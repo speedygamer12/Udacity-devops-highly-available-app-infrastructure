@@ -4,6 +4,10 @@
 		"ParameterValue": "UdacityProject"
 	},		
 	{
+		"ParameterKey": "JumbBoxKey",
+		"ParameterValue": "jumpbox-key"
+	},	
+	{
 		"ParameterKey": "VpcCIDR",
 		"ParameterValue": "10.0.0.0/16"
 	},

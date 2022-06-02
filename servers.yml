@@ -11,6 +11,9 @@ Parameters:
         Description: Please enter the IP range (CIDR notation) for this VPC
         Type: String
         Default: 10.0.0.0/16
+    JumbBoxKey:
+        Description: Please enter the key to your jumb box
+        Type: String 
 
 Resources:
 
@@ -81,7 +84,7 @@ Resources:
         Type: AWS::EC2::Instance
         Properties: 
             ImageId: ami-047a51fa27710816e
-            KeyName: jumpbox-key
+            KeyName: !Ref JumbBoxKey
             InstanceType: t3.small
             AvailabilityZone: !Select [ 0, !GetAZs ]
             SecurityGroupIds: [!Ref JBSecGroup]
@@ -121,7 +124,6 @@ Resources:
                     aws s3 sync s3://s3policy-s3bucket331165652797-1wllxa4s33ods /var/www/html
 
             ImageId: ami-09d56f8956ab235b3
-            KeyName: privserver-key
             SecurityGroups:
                 - Ref: WebServerSecGroup
             InstanceType: t3.small
