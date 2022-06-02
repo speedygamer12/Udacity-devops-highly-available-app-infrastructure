@@ -1,0 +1,59 @@
+Parameters:
+
+    EnvironmentName:
+        Description: An environment name that will be prefixed to resource names
+        Type: String
+
+Resources:
+
+    InstanceProfile:
+        Type: AWS::IAM::InstanceProfile
+        Properties: 
+            Roles:
+                - !Ref UdacityS3ReadOnlyEC2
+
+    UdacityS3ReadOnlyEC2:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                    - Effect: Allow
+                      Principal:
+                        Service: ec2.amazonaws.com
+                      Action: sts:AssumeRole
+            Path: /
+
+    RolePolicies:
+        Type: AWS::IAM::Policy
+        DependsOn:
+            - S3Bucket331165652797
+        Properties:
+            PolicyName: S3ReadOnlyPolicy
+            PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                    - Effect: Allow
+                      Action: 
+                        - s3:Get*
+                        - s3:List*
+                        - s3-object-lambda:Get*
+                        - s3-object-lambda:List*
+                
+                      Resource: '*'
+            Roles:
+                - !Ref UdacityS3ReadOnlyEC2
+
+    S3Bucket331165652797:
+        Type: AWS::S3::Bucket
+                
+
+Outputs: 
+
+    InstanceProfile: 
+        Description: A reference to the created profile 
+        Value: !Ref InstanceProfile
+        Export:
+          Name: !Sub ${EnvironmentName}-IamUser
+
+    

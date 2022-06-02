@@ -1,0 +1,245 @@
+Description: >
+    Yusuf Giwa / Udacity
+
+Parameters:
+
+    EnvironmentName:
+        Description: An environment name that will be prefixed to resource names
+        Type: String
+    
+    VpcCIDR: 
+        Description: Please enter the IP range (CIDR notation) for this VPC
+        Type: String
+        Default: 10.0.0.0/16
+
+Resources:
+
+    LBSecGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Allow http to our load balancer 
+            VpcId:
+                Fn::ImportValue:
+                    !Sub "${EnvironmentName}-VPCID"
+            SecurityGroupIngress:
+                - IpProtocol: tcp
+                  FromPort: 80
+                  ToPort: 80
+                  CidrIp: 0.0.0.0/0
+            SecurityGroupEgress:
+                - IpProtocol: "-1"
+                  Description: Allow all
+                  FromPort: 0
+                  ToPort: 65535
+                  CidrIp: 0.0.0.0/0
+
+    WebServerSecGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Allow http to our web server
+            VpcId:
+                Fn::ImportValue:
+                    !Sub "${EnvironmentName}-VPCID"
+            SecurityGroupIngress:
+                - CidrIp: !Ref VpcCIDR
+                  Description: SSH Access
+                  IpProtocol: tcp
+                  FromPort: 22
+                  ToPort: 22
+                - CidrIp: !Ref VpcCIDR
+                  Description: HTTP Access
+                  IpProtocol: tcp
+                  FromPort: 80
+                  ToPort: 80
+
+            SecurityGroupEgress:
+                - IpProtocol: tcp
+                  FromPort: 0
+                  ToPort: 65535
+                  CidrIp: 0.0.0.0/0
+
+    JBSecGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Allow ssh from my IP - Administrator access
+            VpcId:
+                Fn::ImportValue:
+                    !Sub "${EnvironmentName}-VPCID"
+            SecurityGroupIngress:
+                - IpProtocol: tcp
+                  FromPort: 22
+                  ToPort: 22
+                  CidrIp: 102.89.45.244/32
+            SecurityGroupEgress:
+                - IpProtocol: tcp
+                  Description: Allow all
+                  FromPort: 0
+                  ToPort: 65535
+                  CidrIp: 0.0.0.0/0
+    
+    BastionHost1:
+        Type: AWS::EC2::Instance
+        Properties: 
+            ImageId: ami-047a51fa27710816e
+            KeyName: jumpbox-key
+            InstanceType: t3.small
+            AvailabilityZone: !Select [ 0, !GetAZs ]
+            SecurityGroupIds: [!Ref JBSecGroup]
+            SubnetId: 
+                Fn::ImportValue: !Sub "${EnvironmentName}-PUB1-SN"
+            Tags:
+                - Key: Name
+                  Value: !Sub ${EnvironmentName}-bastion-host-1
+
+    BastionHost2:
+        Type: AWS::EC2::Instance
+        Properties: 
+            ImageId: ami-047a51fa27710816e
+            KeyName: jumpbox-key
+            InstanceType: t3.small
+            AvailabilityZone: !Select [ 1, !GetAZs ]
+            SecurityGroupIds: [!Ref JBSecGroup]
+            SubnetId: 
+                Fn::ImportValue: !Sub "${EnvironmentName}-PUB2-SN"
+            Tags:
+                - Key: Name
+                  Value: !Sub ${EnvironmentName}-bastion-host-2
+                  
+    WebAppLaunchConfig:
+        Type: AWS::AutoScaling::LaunchConfiguration
+        Properties:
+            IamInstanceProfile: 
+                Fn::ImportValue: !Sub "${EnvironmentName}-IamUser"
+            UserData:
+                Fn::Base64: !Sub |
+                    #!/bin/bash
+                    apt-get update -y
+                    apt-get install apache2 -y
+                    systemctl start apache2.service
+                    cd /var/www/html
+                    apt install awscli -y 
+                    aws s3 sync s3://s3policy-s3bucket331165652797-1wllxa4s33ods /var/www/html
+
+            ImageId: ami-09d56f8956ab235b3
+            KeyName: privserver-key
+            SecurityGroups:
+                - Ref: WebServerSecGroup
+            InstanceType: t3.small
+            BlockDeviceMappings:
+                - DeviceName: "/dev/sdk"
+                  Ebs: 
+                    VolumeSize: '10'
+
+    WebAppGroup:
+        Type: AWS::AutoScaling::AutoScalingGroup
+        Properties:
+            VPCZoneIdentifier:
+                - Fn::ImportValue: 
+                    !Sub "${EnvironmentName}-PRIV-NETS"
+            LaunchConfigurationName:
+                !Ref WebAppLaunchConfig
+            MinSize: '4'
+            MaxSize: '8'
+            TargetGroupARNs:
+                - !Ref WebAppTargetGroup
+
+    WebAppLB:
+        Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+        Properties:
+            Type: application
+            Scheme: internet-facing
+            IpAddressType: ipv4
+            Subnets:
+                - Fn::ImportValue: !Sub "${EnvironmentName}-PUB1-SN"
+                - Fn::ImportValue: !Sub "${EnvironmentName}-PUB2-SN"
+            SecurityGroups:
+                - !Ref LBSecGroup
+
+    Listener:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        Properties:
+            DefaultActions:
+                - Type: forward
+                  TargetGroupArn:
+                    Ref: WebAppTargetGroup
+            LoadBalancerArn:
+              Ref: WebAppLB
+            Port: 80
+            Protocol: HTTP
+
+    ALBListenerRule:
+        Type: AWS::ElasticLoadBalancingV2::ListenerRule
+        Properties:
+            Actions:
+                - Type: forward
+                  TargetGroupArn: !Ref 'WebAppTargetGroup'
+            Conditions:
+                - Field: path-pattern
+                  Values: [/]
+            ListenerArn: !Ref 'Listener'
+            Priority: 1
+
+    WebAppTargetGroup:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties:
+            HealthCheckIntervalSeconds: 10
+            HealthCheckPath: /
+            HealthCheckProtocol: HTTP
+            HealthCheckTimeoutSeconds: 8
+            HealthyThresholdCount: 2
+            Port: 80
+            Protocol: HTTP
+            UnhealthyThresholdCount: 5
+            VpcId: 
+                Fn::ImportValue:
+                    Fn::Sub: "${EnvironmentName}-VPCID"
+
+Outputs: 
+
+    LBSecGroup: 
+        Description: A reference to the created load balancer sec group dns
+        Value: !Ref LBSecGroup
+        Export:
+          Name: !Sub ${EnvironmentName}-LBSecGroup
+    
+    WebServerSecGroup: 
+        Description: A reference to the created Web Server sec group dns
+        Value: !Ref WebServerSecGroup
+        Export:
+          Name: !Sub ${EnvironmentName}-WebServerSecGroup
+
+    WebServerSecGroup: 
+        Description: A reference to the created Web Server sec group dns
+        Value: !Ref WebServerSecGroup
+        Export:
+          Name: !Sub ${EnvironmentName}-WebServerSecGroup
+
+    BastionHost1: 
+        Description: A reference to the created BastionHost1
+        Value: !Ref BastionHost1
+        Export:
+          Name: !Sub ${EnvironmentName}-BastionHost1
+    
+    BastionHost2: 
+        Description: A reference to the created BastionHost1
+        Value: !Ref BastionHost2
+        Export:
+          Name: !Sub ${EnvironmentName}-BastionHost2
+
+    WebAppGroup: 
+        Description: A reference to the created AutoScaling Group
+        Value: !Ref WebAppGroup
+        Export:
+          Name: !Sub ${EnvironmentName}-WebAppGroup
+    
+    WebAppLB: 
+        Description: A reference to the created load Balancer
+        Value: !Ref WebAppLB
+        Export:
+          Name: !Sub ${EnvironmentName}-WebAppLB
+
+    LBURL: 
+        Description: A reference to the created Load Balancer URL
+        Value: !Join ["", ["http://", !GetAtt WebAppLB.DNSName]]
+        Export:
+          Name: !Sub ${EnvironmentName}-LB-URL
