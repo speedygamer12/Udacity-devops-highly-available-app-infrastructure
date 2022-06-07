@@ -1,6 +1,6 @@
 ## infrastructure For Highly Availaible App
 
-Contains 4 base Instances in two private subnets in different Availaibilt zones.
+Contains 4 base Instances in two private subnets in different Availaibily zones.
 LoadBalncer DSN: http://serve-webap-r7kyrynrrzv3-1532804460.us-east-1.elb.amazonaws.com/
 
 The infrastructure template was split into:
